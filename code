@@ -1,0 +1,387 @@
+/*
+Name: Joseph Horne
+Date: 12/8/2025
+Algorithm: Zybooks
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+typedef struct wordnode_s {
+    char word[15];
+    int point;  // points assigned for each word
+} wordnode;
+
+int count_lines(const char *filename, FILE **file) {
+    // function to count how many lines are in the randomly selected file
+    int count = 0;
+    char buffer[256];  // temporary buffer for reading each line in the file
+
+    while (fgets(buffer, sizeof(buffer), *file) != NULL) {  // read each line until EOF
+        count++;
+    }
+
+    fclose(*file);  // close file since file posiiton is now at the EOF
+    *file = fopen(filename, "r");  // re-open file so the caller gets a new FILE* reset to the beginning
+    return count;
+}
+
+void read_file(FILE *inp, wordnode fileWords[], int size) {
+    // function to read the words and associated points for each word, then puts it into an array
+    for (int i = 0; i < size; i++) {
+        fscanf(inp, "%14s %d", fileWords[i].word, &fileWords[i].point);
+    }
+}
+
+char* scramble_word(const char* myWord) {
+    // function to scramble a word which will be displayed in the "Letters in words" section
+    int len = (int)strlen(myWord);  // get length of the input word
+    char *result = (char*)malloc(len + 1);  // allocate memory for the scrambled word
+    if (result == NULL) {
+        return NULL;
+    }
+    strcpy(result, myWord);  // copy original word into allocated result
+
+    for (int i = 0; i < len - 1; i++) {
+        // randomly shuffle the letters around
+        int j = i + rand() % (len - i);
+        char tmp = result[i];
+        result[i] = result[j];
+        result[j] = tmp;
+    }
+    return result;  // return the shuffled word
+}
+
+void createHint(const char word[], char result[]) {
+    // function to create each hint word which means displaying only the vowels in each word
+    int len = (int)strlen(word);  // get the length of the input word
+    for (int i = 0; i < len; i++) {
+        char c = word[i];  // get the current character in the word
+        if (c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u') {
+            // if the word is a vowel, return that letter
+            result[i] = c;
+        } else {
+            // if the word is not a vowel, return an underscore
+            result[i] = '_';
+        }
+    }
+    result[len] = '\0';  // add a null terminator to the resulting hint string
+}
+
+void remove_word_at(wordnode arr[], int *size, int index) {
+    // function to remove a word in the array
+    if (index < 0 || index >= *size) {  // if the index is outside the current size, do nothing
+        return;
+    }
+    for (int i = index + 1; i < *size; i++) {
+        // shift every element after "index" one position to the left to ensure no gaps
+        arr[i - 1] = arr[i];
+    }
+    (*size)--;  // reduce the size of the array
+}
+
+int main(void) {
+    char first_word[15];
+    char fileName[32], baseName[16], extension[8], numStr[4];
+    char firstHint[32], secondHint[32], thirdHint[32], fourthHint[32];
+    FILE *inFile;
+    int fileChoice, fileSize = 0, guessesLeft = 10;
+    int lowerLength, upperLength;
+    wordnode *file_words = NULL;
+
+    // tracking guesses and points
+    char correctGuesses[100][16];
+    int correctCount = 0;
+    char wrongGuesses[100][16];
+    int wrongCount = 0;
+    int totalPoints = 0;
+
+    // set up random usage
+    srand(time(NULL));
+
+    printf("|--------------------------|\n");
+    printf("|- LET's Play Word Finder -|\n");
+    printf("|--------------------------|\n\n");
+
+    // pick random file WordSet0 to WordSet9.txt
+    fileChoice = rand() % 10;
+    strcpy(baseName, "WordSet");
+    strcpy(extension, ".txt");
+    numStr[0] = (char)(fileChoice + '0');
+    numStr[1] = '\0';
+    // append each part of the file that will be chosen
+    strcpy(fileName, baseName);
+    strcat(fileName, numStr);
+    strcat(fileName, extension);
+   
+    // open the file in read mode
+    inFile = fopen(fileName, "r");
+    if (inFile == NULL) {
+        printf("Error opening file %s\n", fileName);
+        return 0;
+    }
+
+    fileSize = count_lines(fileName, &inFile);
+    if (fileSize <= 0) {
+        printf("No words in file\n");
+        fclose(inFile);
+        return 0;
+    }
+
+    // allocate memory for the array of all the wordnodes
+    file_words = (wordnode*)malloc(fileSize * sizeof(wordnode));
+    if (file_words == NULL) {
+        printf("Memory allocation failed\n");
+        fclose(inFile);
+        return 0;
+    }
+
+    read_file(inFile, file_words, fileSize);
+    fclose(inFile);  // close file since all data has been obtained from it
+
+    // initial scramble for first word
+    strncpy(first_word, file_words[0].word, sizeof(first_word) - 1);
+    first_word[sizeof(first_word) - 1] = '\0';
+    char *scrambledWord = scramble_word(first_word);
+
+    // get the guess bounds
+    upperLength = (int)strlen(file_words[0].word);
+    lowerLength = (int)strlen(file_words[fileSize - 1].word);
+
+    // set up the main while loop that will be used for the interactivity aspect
+    int quit = 0;  // set a flag for checking if the user wants to quit or not
+    guessesLeft = 10;  // set up the initial amount of guesses the user gets
+
+    while ((quit == 0) && (guessesLeft > 0) && (fileSize > 0)) {
+        printf("@@@ --- @@@ Letters in words @@@ --- @@@\n");
+
+        // refresh scrambledWord for the current longest word
+        if (scrambledWord != NULL) {
+            free(scrambledWord);
+            scrambledWord = NULL;
+        }
+        // copy the first word from file_words into first_word buffer
+        strncpy(first_word, file_words[0].word, sizeof(first_word) - 1);
+        first_word[sizeof(first_word) - 1] = '\0';  // ensure null character termination
+        scrambledWord = scramble_word(first_word);  // attempt to scramble the copied word
+        if (scrambledWord == NULL) {  // if the scrambling failed
+            // allocate memory to store a non-scrambled fallback copy
+            scrambledWord = (char*)malloc(strlen(first_word) + 1);
+            if (scrambledWord != NULL) {
+                // copy the original word as a fallback in case of anything
+                strcpy(scrambledWord, first_word);
+            }
+        }
+        printf("\t\t%s\t\n", scrambledWord);
+
+        printf("@@@ --- @@@ --- --- --- --- @@@ --- @@@\n\n");
+
+        // guessing setup
+        printf("You have %d guesses left\n", guessesLeft);
+        printf("Clues to help you guess\n");
+
+        // build clues
+        int clues[4];
+        for (int i = 0; i < 4; i++) {
+            // initialize all clue to be -1 which means they are unused or there isnt a clue
+            clues[i] = -1;
+        }
+        if (fileSize == 1) {
+            // only one word in the wordnode array so display one clue
+            clues[0] = 0;
+        } else if (fileSize == 2) {
+            // two words in the wordnode array so display both words
+            clues[0] = 1;
+            clues[1] = 0;
+        } else if (fileSize == 3) {
+            // three words in the wordnode array so display the three words
+            clues[0] = 2;
+            clues[1] = 1;
+            clues[2] = 0;
+        } else {
+            // four or more words in the wordnode array means display first two and last two words
+            clues[0] = fileSize - 1;
+            clues[1] = fileSize - 2;
+            clues[2] = 0;
+            clues[3] = 1;
+        }
+
+        // prepare and print hints (skip -1 slots)
+        // clear all hint strings so they start empty
+        firstHint[0] = '\0';
+        secondHint[0] = '\0';
+        thirdHint[0] = '\0';
+        fourthHint[0] = '\0';
+        if (clues[0] != -1) {
+            // if clue at index 0 is valid (not -1), generate the hint and print it
+            createHint(file_words[clues[0]].word, firstHint);
+            printf("%s\n", firstHint);
+        }
+        if (clues[1] != -1) {
+            // if clue at index 1 is valid (not -1), generate the hint and print it
+            createHint(file_words[clues[1]].word, secondHint);
+            printf("%s\n", secondHint);
+        }
+        if (clues[2] != -1) {
+            // if clue at index 2 is valid (not -1), generate the hint and print it
+            createHint(file_words[clues[2]].word, thirdHint);
+            printf("%s\n", thirdHint);
+        }
+        if (clues[3] != -1) {
+            // if clue at index 3 is valid (not -1), generate the hint and print it
+            createHint(file_words[clues[3]].word, fourthHint);
+            printf("%s\n", fourthHint);
+        }
+        printf("\n");
+
+        // get user guess using fgets
+        char userGuess[64];
+        while (1) {
+            // ask user to enter a guess within the bounds
+            printf("Enter your guess (%d-%d characters): ", lowerLength, upperLength);
+            if (fgets(userGuess, sizeof(userGuess), stdin) == NULL) {  // attempt to read input line
+                // if fgets fails, set quit flag and exit loop
+                quit = 1;
+                break;
+            }
+            size_t len = strlen(userGuess);  // get length of the guess including newline if present
+            if (len > 0 && userGuess[len - 1] == '\n') {
+                userGuess[len - 1] = '\0';  // if last character is "\n" change to null terminator
+            }
+            else {
+                // if input was too long to fit, flush remaining characters
+                int ch;
+                while ((ch = getchar()) != '\n' && ch != EOF);
+            }
+            // check if the users guess is within the bound lengths
+            if (((int)strlen(userGuess) >= lowerLength) && ((int)strlen(userGuess) <= upperLength)) {
+                break;  // means a valid guess, breaks the input loop
+            }
+        }
+        // if the error check was triggered above, break the outer while loop
+        if (quit == 1) {
+            break;
+        }
+       
+        // check if the users word exists in file_words
+        int matchedIndex = -1;
+        for (int i = 0; i < fileSize; i++) {  // go through all the words in file_words
+            if (strcmp(userGuess, file_words[i].word) == 0) {
+                matchedIndex = i;  // store the index in which the word matches
+                break;
+            }
+        }
+
+        if (matchedIndex == -1) {
+            // if the user guessed wrong
+            printf("\n:( --- :( --- :( --- :( --- :( --- :( --- :(\n");
+            printf("Oops ... you lost 1 guess\n");
+            guessesLeft--;  // user loses one guess
+            if (wrongCount < 100) {  // store the wrong guess if space allows
+                strncpy(wrongGuesses[wrongCount], userGuess, 15);
+                wrongGuesses[wrongCount][15] = '\0';  // ensure null termination
+                wrongCount++;
+            }
+            printf("You have %d guesses left\n", guessesLeft);
+            printf(":( --- :( --- :( --- :( --- :( --- :( --- :(\n\n");
+        } else {
+            // if the user guessed correct
+            int points = file_words[matchedIndex].point;  // get points for the word
+            totalPoints += points;  // add points to the total score
+            if (correctCount < 100) {  // store the correct guess if space allows
+                strncpy(correctGuesses[correctCount], file_words[matchedIndex].word, 15);
+                correctGuesses[correctCount][15] = '\0';  // ensure null termination
+                correctCount++;
+            }
+
+            printf("\n$$$ --- $$$ --- $$$ --- $$$ --- $$$ --- $$$\n");
+            printf("Yay ... you got %d points\n", points);
+            printf("Total points: %d\n", totalPoints);
+            printf("$$$ --- $$$ --- $$$ --- $$$ --- $$$ --- $$$\n");
+            printf("\n");
+
+            // remove the found word from the list so it cant be guessed again
+            remove_word_at(file_words, &fileSize, matchedIndex);
+        }
+
+        // show current correct list
+        printf("Correct guesses: ");
+        if (correctCount == 0) {
+            printf(" ");
+        }
+        for (int i = 0; i < correctCount; i++) {
+            if (i == 0) {
+                // first word so there is no leading space
+                printf("%s", correctGuesses[i]);
+            } else {
+                // every following word gets a leading space
+                printf(" %s", correctGuesses[i]);
+            }
+        }
+        printf("\n");
+
+        // show current wrong list
+        printf("Wrong guesses: ");
+        if (wrongCount == 0) {
+            printf(" ");
+        }
+        for (int i = 0; i < wrongCount; i++) {
+            if (i == 0) {
+                // first word so there is no leading space
+                printf("%s", wrongGuesses[i]);
+            } else {
+                // every following word gets a leading space
+                printf(" %s", wrongGuesses[i]);
+            }
+        }
+        printf("\n\n");
+
+        // continue or quit prompt
+        char contBuf[8];
+        printf("Continue? (q to quit): ");
+        if (fgets(contBuf, sizeof(contBuf), stdin) == NULL) {
+            // fgets failed which means we treat as quit
+            quit = 1;
+        }
+        else if (contBuf[0] == 'q' || contBuf[0] == 'Q') {
+            quit = 1;
+        }
+        printf("\n");
+    }
+
+    // display the final messages based on what happned from the game
+    if (fileSize == 0) {  // if user guesses all the words
+        printf("!!! --- !!! --- !!! --- !!! --- !!!\n");
+        printf("You got %d points\n", totalPoints);
+        printf("Congrats, You completed the list!\n");
+    } else if (guessesLeft == 0) {  // if the user runs out of guesses
+        printf(":( --- :( --- :( --- :( --- :( --- :( --- :(\n");
+        printf("Oops, you used up all your guesses, You got %d points\n", totalPoints);
+        printf("Better luck next time\n");
+    } else {  // if the user decideds to quit, display what remained
+        printf("|--- G o o d --- T r y ---|\n");
+        printf("|--- You got %d points ---|\n\n", totalPoints);
+        printf("Unguessed words:\n");
+        for (int i = 0; i < fileSize; i++) {  // display all the unguessed words from the game
+            printf("%s", file_words[i].word);
+            if (i < fileSize - 1) {
+                printf(", ");
+            }
+        }
+        printf("\n");
+    }
+
+    // free up the space the remains from the memory allocation
+    if (scrambledWord != NULL) {
+        free(scrambledWord);
+    }
+    if (file_words != NULL) {
+        free(file_words);
+    }
+
+    // print final message meaning game is officially over
+    printf("Good Game ... Good Bye\n");
+    return 0;
+}
